@@ -1,0 +1,84 @@
+servers:
+  - id: github
+    name: GitHub
+    transport:
+      type: streamable_http
+      url: https://github-mcp.test.internal
+    data_tier: 2
+    auth_strategy: oauth
+    oauth_provider:
+      auth_url: https://github.com/login/oauth/authorize
+      token_url: https://github.com/login/oauth/access_token
+      client_id: test-client-id
+      client_secret_ref: proxy/test/github-oauth-secret
+      scopes: ["repo", "read:org"]
+      pkce_required: true
+    auth_injection:
+      method: header_bearer
+    allowed_groups: ["engineering"]
+    enabled: true
+    circuit_breaker:
+      failure_threshold: 5
+      reset_timeout: 30s
+      half_open_max: 2
+    tags:
+      team: platform
+      environment: test
+
+  - id: clinical
+    name: Clinical Data API
+    transport:
+      type: streamable_http
+      url: https://clinical-mcp.test.internal
+    data_tier: 4
+    auth_strategy: static
+    credential_ref: proxy/test/clinical-api-key
+    auth_injection:
+      method: header_bearer
+    allowed_groups: ["clinical-engineering", "data-science"]
+    enabled: true
+    circuit_breaker:
+      failure_threshold: 3
+      reset_timeout: 60s
+      half_open_max: 1
+    tags:
+      hipaa: "true"
+      team: clinical
+      environment: test
+
+  - id: infrastructure
+    name: Infrastructure Tools
+    transport:
+      type: streamable_http
+      url: https://infra-mcp.test.internal
+    data_tier: 4
+    auth_strategy: sts
+    credential_ref: arn:aws:iam::123456789:role/mcp-infra-role
+    auth_injection:
+      method: header_bearer
+    allowed_groups: ["platform-engineering"]
+    enabled: true
+    tags:
+      team: platform
+      environment: test
+
+  - id: jira
+    name: Jira
+    transport:
+      type: streamable_http
+      url: https://jira-mcp.test.internal
+    data_tier: 2
+    auth_strategy: oauth
+    oauth_provider:
+      auth_url: https://auth.atlassian.com/authorize
+      token_url: https://auth.atlassian.com/oauth/token
+      client_id: test-jira-client
+      client_secret_ref: proxy/test/jira-oauth-secret
+      scopes: ["read:jira-work", "write:jira-work"]
+      pkce_required: true
+    auth_injection:
+      method: header_bearer
+    enabled: true
+    tags:
+      team: product
+      environment: test

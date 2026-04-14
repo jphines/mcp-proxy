@@ -1,0 +1,98 @@
+suite: "Clinical data access"
+
+setup:
+  policy_dir: "../base.yaml"
+
+cases:
+  - name: "human in clinical-engineering can read"
+    identity:
+      subject: "jane@ro.com"
+      type: human
+      groups: ["clinical-engineering"]
+      scopes: ["mcp:read"]
+    call:
+      server_id: clinical
+      tool_name: get_patient_labs
+      tier: 2
+    expect:
+      action: allow
+
+  - name: "human in data-science can read"
+    identity:
+      subject: "bob@ro.com"
+      type: human
+      groups: ["data-science"]
+    call:
+      server_id: clinical
+      tool_name: query_patient_records
+      tier: 2
+    expect:
+      action: allow
+
+  - name: "human outside team denied clinical read"
+    identity:
+      subject: "alice@ro.com"
+      type: human
+      groups: ["engineering"]
+    call:
+      server_id: clinical
+      tool_name: get_patient_labs
+      tier: 2
+    expect:
+      action: deny
+      rule: restrict-clinical-to-team
+
+  - name: "agent denied clinical write"
+    identity:
+      subject: "agent-rx-checker"
+      type: agent
+      groups: ["clinical-engineering"]
+    call:
+      server_id: clinical
+      tool_name: update_prescription
+      tier: 3
+    expect:
+      action: deny
+      rule: deny-agents-clinical-write
+
+  - name: "agent allowed clinical read"
+    identity:
+      subject: "agent-labs-reader"
+      type: agent
+      groups: ["clinical-engineering"]
+    call:
+      server_id: clinical
+      tool_name: get_patient_labs
+      tier: 2
+    expect:
+      action: allow
+
+  - name: "production delete is red-lined"
+    identity:
+      subject: "admin@ro.com"
+      type: human
+      groups: ["clinical-engineering"]
+    call:
+      server_id: clinical
+      tool_name: delete_patient_record
+      tier: 4
+    env:
+      workspace: production
+    expect:
+      action: deny
+      rule: red-line-delete-production-clinical
+
+  - name: "tier-4 action requires approval"
+    identity:
+      subject: "jane@ro.com"
+      type: human
+      groups: ["clinical-engineering"]
+    call:
+      server_id: clinical
+      tool_name: archive_patient_data
+      tier: 4
+    env:
+      workspace: staging
+    expect:
+      action: require_approval
+      rule: require-approval-tier4

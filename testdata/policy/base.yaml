@@ -1,0 +1,59 @@
+rules:
+  # Red-line: hard deny deletion of production clinical data.
+  - id: red-line-delete-production-clinical
+    priority: 1
+    condition: >
+      tool.server == "clinical" &&
+      tool.name.contains("delete") &&
+      env.workspace == "production"
+    action: deny
+    reason: "Deletion of production clinical data is prohibited"
+    audit_level: full
+
+  # Red-line: agents may not call clinical write tools at any tier.
+  - id: deny-agents-clinical-write
+    priority: 5
+    condition: >
+      tool.server == "clinical" &&
+      identity.type == "agent" &&
+      (tool.name.contains("update") || tool.name.contains("write") || tool.name.contains("create"))
+    action: deny
+    reason: "Agents may not write to clinical data sources"
+    audit_level: full
+
+  # Restrict clinical tools to authorised groups.
+  - id: restrict-clinical-to-team
+    priority: 20
+    condition: >
+      tool.server == "clinical" &&
+      !identity.groups.exists(g, g == "clinical-engineering" || g == "data-science")
+    action: deny
+    reason: "Clinical tools restricted to clinical-engineering and data-science groups"
+    audit_level: full
+
+  # Tier 4+ actions require human approval.
+  - id: require-approval-tier4
+    priority: 100
+    condition: "tool.tier >= 4"
+    action: require_approval
+    reason: "High-impact or irreversible actions require human approval"
+    audit_level: full
+    approval:
+      channel: slack
+      timeout: 5m
+      require_diff: false
+
+  # Log all tier-3 calls for enhanced audit visibility.
+  - id: log-tier3-writes
+    priority: 200
+    condition: "tool.tier == 3"
+    action: log
+    reason: "Tier-3 write actions are logged for compliance"
+    audit_level: full
+
+  # Default: allow all other calls with standard audit.
+  - id: default-allow
+    priority: 999
+    condition: "true"
+    action: allow
+    audit_level: standard

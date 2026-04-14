@@ -1,0 +1,33 @@
+# Binaries
+mcp-proxy
+/bin/
+
+# Test artifacts
+coverage.out
+coverage.html
+*.coverprofile
+
+# Build cache
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Env files (never commit secrets)
+.env
+.env.*
+*.pem
+*.key
+
+# Testcontainers reaper socket
+/tmp/
+
+# Go workspace (if used locally)
+go.work
+go.work.sum

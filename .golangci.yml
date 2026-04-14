@@ -1,0 +1,41 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - exhaustive
+    - noctx
+    - godot
+    - gofmt
+    - goimports
+    - gosec
+    - misspell
+    - unconvert
+    - unused
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+  exhaustive:
+    default-signifies-exhaustive: true
+  godot:
+    scope: toplevel
+    period: true
+  gosec:
+    excludes:
+      - G104  # errors unhandled in defer (handled explicitly)
+  goimports:
+    local-prefixes: github.com/ro-eng/mcp-proxy
+
+issues:
+  exclude-rules:
+    - path: "_test\\.go"
+      linters:
+        - errcheck
+        - gosec
+    - path: "mocks/"
+      linters:
+        - all

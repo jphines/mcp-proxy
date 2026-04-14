@@ -1,0 +1,55 @@
+suite: "Agent identity constraints"
+
+setup:
+  policy_dir: "../base.yaml"
+
+cases:
+  - name: "agent can read non-clinical tools"
+    identity:
+      subject: "agent-infra"
+      type: agent
+      groups: ["platform-engineering"]
+    call:
+      server_id: github
+      tool_name: list_pull_requests
+      tier: 1
+    expect:
+      action: allow
+
+  - name: "agent tier-3 github write is logged and allowed"
+    identity:
+      subject: "agent-pr-bot"
+      type: agent
+      groups: ["engineering"]
+    call:
+      server_id: github
+      tool_name: create_pull_request
+      tier: 3
+    expect:
+      # log rules compose; default-allow fires after, so final action is allow
+      action: allow
+
+  - name: "agent tier-4 requires approval"
+    identity:
+      subject: "agent-infra"
+      type: agent
+      groups: ["platform-engineering"]
+    call:
+      server_id: infrastructure
+      tool_name: scale_down_cluster
+      tier: 4
+    expect:
+      action: require_approval
+      rule: require-approval-tier4
+
+  - name: "service account allowed non-clinical read"
+    identity:
+      subject: "svc-reporting"
+      type: service
+      groups: ["reporting-services"]
+    call:
+      server_id: jira
+      tool_name: list_issues
+      tier: 1
+    expect:
+      action: allow

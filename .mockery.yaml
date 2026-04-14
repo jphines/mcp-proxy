@@ -1,0 +1,23 @@
+resolve-type-alias: false
+disable-version-string: true
+issue-845-fix: true
+
+packages:
+  github.com/ro-eng/mcp-proxy/gateway:
+    config:
+      outpkg: mocks
+      dir: "internal/mocks"
+      filename: "mock_{{.InterfaceName}}.go"
+      mockname: "Mock{{.InterfaceName}}"
+      with-expecter: true
+    interfaces:
+      Authenticator:
+      PolicyEngine:
+      CredentialStore:
+      CredentialResolver:
+      ServerRegistry:
+      AuditLogger:
+      ApprovalService:
+      OAuthEnrollment:
+      TokenExchanger:
+      MetricsCollector:
