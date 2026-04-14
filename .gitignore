@@ -19,6 +19,9 @@ coverage.html
 # macOS
 .DS_Store
 
+# Claude Code workspace settings (local only)
+.claude/
+
 # Env files (never commit secrets)
 .env
 .env.*
