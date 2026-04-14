@@ -1,6 +1,7 @@
 # Binaries
-mcp-proxy
 /bin/
+/mcp-proxy
+/policy-test
 
 # Test artifacts
 coverage.out
