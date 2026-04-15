@@ -19,12 +19,12 @@ import (
 // Handler handles POST /approvals/slack/callback from Slack's interactive components.
 // It verifies the Slack signing secret, extracts the decision, and delivers it to Service.
 type Handler struct {
-	service       *Service
+	service       gateway.ApprovalService
 	signingSecret string
 }
 
 // NewHandler creates a Handler.
-func NewHandler(service *Service, signingSecret string) *Handler {
+func NewHandler(service gateway.ApprovalService, signingSecret string) *Handler {
 	return &Handler{service: service, signingSecret: signingSecret}
 }
 
