@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
-	"github.com/ro-eng/mcp-proxy/internal/audit"
-	"github.com/ro-eng/mcp-proxy/internal/store"
+	"github.com/jphines/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/internal/audit"
+	"github.com/jphines/mcp-proxy/internal/store"
 )
 
 // --- stub CloudWatch client ---

@@ -28,7 +28,7 @@ linters-settings:
     excludes:
       - G104  # errors unhandled in defer (handled explicitly)
   goimports:
-    local-prefixes: github.com/ro-eng/mcp-proxy
+    local-prefixes: github.com/jphines/mcp-proxy
 
 issues:
   exclude-rules:

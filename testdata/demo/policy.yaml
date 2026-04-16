@@ -1,0 +1,80 @@
+rules:
+  # Deny all tier-4 (destructive) calls from autonomous agents.
+  - id: deny-agents-destructive
+    priority: 10
+    condition: >
+      identity.type == "agent" && tool.tier >= 4
+    action: deny
+    reason: "Autonomous agents may not call destructive tier-4 tools"
+    audit_level: full
+
+  # Block delete_records for anyone outside the data-platform group.
+  - id: restrict-delete-to-data-platform
+    priority: 20
+    condition: >
+      tool.name == "delete_records" &&
+      !identity.groups.exists(g, g == "data-platform")
+    action: deny
+    reason: "Record deletion restricted to data-platform group members"
+    audit_level: full
+
+  # Require human approval before scaling infrastructure.
+  - id: require-approval-scale
+    priority: 30
+    condition: "tool.name == \"scale_service\""
+    action: require_approval
+    reason: "Infrastructure scaling requires human approval"
+    audit_level: full
+    approval:
+      channel: slack
+      timeout: 30s
+      require_diff: false
+
+  # Require human approval before deleting or replacing Google Doc content.
+  # Appending (update_document with mode=append) is allowed without approval.
+  - id: require-approval-google-doc-replace
+    priority: 35
+    condition: >
+      tool.server == "google" && tool.name == "update_document" &&
+      tool.args.mode == "replace"
+    action: require_approval
+    reason: "Replacing an entire Google Doc requires human approval"
+    audit_level: full
+    approval:
+      channel: slack
+      timeout: 30s
+      require_diff: true
+
+  # Deny everyone from deleting calendar events.
+  - id: deny-all-calendar-delete
+    priority: 40
+    condition: "tool.name == \"delete_event\""
+    action: deny
+    reason: "Calendar event deletion is disabled"
+    audit_level: full
+
+  # Log all database queries for compliance visibility.
+  - id: log-db-queries
+    priority: 50
+    condition: "tool.name == \"query_db\""
+    action: log
+    reason: "Database queries are logged for compliance"
+    audit_level: full
+
+  # Log all Google Calendar and Docs writes for audit visibility.
+  - id: log-google-writes
+    priority: 60
+    condition: >
+      tool.server == "google" &&
+      (tool.name == "create_event" || tool.name == "delete_event" ||
+       tool.name == "create_document" || tool.name == "update_document")
+    action: log
+    reason: "Google Workspace writes are logged for audit"
+    audit_level: full
+
+  # Default: allow everything else.
+  - id: default-allow
+    priority: 999
+    condition: "true"
+    action: allow
+    audit_level: standard

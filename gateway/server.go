@@ -82,6 +82,20 @@ type OAuthProvider struct {
 	RedirectBase string
 }
 
+// STSConfig holds the per-server AWS STS AssumeRoleWithWebIdentity configuration.
+// Used when a downstream server requires temporary AWS credentials obtained by
+// exchanging the caller's validated JWT for short-lived IAM credentials.
+type STSConfig struct {
+	// RoleARN is the IAM role to assume (e.g. "arn:aws:iam::123456789012:role/MyRole").
+	RoleARN string
+	// SessionNamePrefix is prepended to the caller's subject to form the role session name.
+	// Default: "mcp-proxy-". The full session name is "{prefix}{identity.Subject}".
+	SessionNamePrefix string
+	// DurationSeconds is the requested credential lifetime (900–3600).
+	// Default: 900 (15 minutes).
+	DurationSeconds int32
+}
+
 // CircuitBreakerConfig controls per-server circuit breaker behaviour.
 type CircuitBreakerConfig struct {
 	// FailureThreshold is the number of consecutive failures before opening the circuit.
@@ -108,6 +122,8 @@ type ServerConfig struct {
 	CredentialRef string
 	// OAuthProvider is set for OAuth-strategy servers.
 	OAuthProvider *OAuthProvider
+	// STSConfig is set for STS-strategy servers that require AssumeRoleWithWebIdentity.
+	STSConfig *STSConfig
 	// AuthInjection describes how to attach the resolved credential.
 	AuthInjection AuthInjection
 	// AllowedGroups restricts tool access to callers in these Okta groups.

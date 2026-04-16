@@ -32,7 +32,7 @@ Claude Code / claude.ai / Agents
 ## Component Map
 
 ```
-github.com/ro-eng/mcp-proxy
+github.com/jphines/mcp-proxy
 ├── cmd/mcp-proxy/        Entry point: wire deps, start server
 ├── gateway/              Interfaces + domain types (no logic)
 └── internal/

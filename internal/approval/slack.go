@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // SlackSender sends approval request notifications to a Slack channel

@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
-	"github.com/ro-eng/mcp-proxy/internal/mocks"
+	"github.com/jphines/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/internal/mocks"
 )
 
 // --- helpers ---
@@ -65,7 +65,7 @@ func makeServerConfig(id string, strategy gateway.AuthStrategy) *gateway.ServerC
 // runPipeline wires a Proxy with the given deps and runs a single tool call.
 func runPipeline(t *testing.T, deps *gateway.Dependencies, serverID, toolName string, args map[string]any) *gateway.ToolCallContext {
 	t.Helper()
-	p := New(deps)
+	p := New(deps, Options{})
 	tc := &gateway.ToolCallContext{
 		RawRequest: makeRawRequest(serverID, toolName, args),
 		RequestID:  "test-req-id",
@@ -110,7 +110,7 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 		MetricsCollector: noopMetrics(t),
 	}
 
-	p := New(deps)
+	p := New(deps, Options{})
 	tc := &gateway.ToolCallContext{
 		RawRequest: makeRawRequest("svc", "tool", nil),
 		RequestID:  "req-1",
@@ -136,7 +136,7 @@ func TestAuthMiddleware_BadToken(t *testing.T) {
 		MetricsCollector: noopMetrics(t),
 	}
 
-	p := New(deps)
+	p := New(deps, Options{})
 	tc := &gateway.ToolCallContext{
 		RawRequest: makeRawRequest("svc", "tool", nil),
 		RequestID:  "req-2",

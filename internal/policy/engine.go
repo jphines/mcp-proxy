@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // compiledRule is a policy rule whose CEL condition has been compiled to a Program.

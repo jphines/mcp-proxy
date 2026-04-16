@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // routeMiddleware parses the namespaced tool name from the MCP request,

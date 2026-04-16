@@ -11,8 +11,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
-	"github.com/ro-eng/mcp-proxy/internal/config"
+	"github.com/jphines/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/internal/config"
 )
 
 // ToolListFunc is called by the tool catalog to retrieve the tools offered by a
@@ -276,6 +276,22 @@ func entryToConfig(e config.ServerEntry) *gateway.ServerConfig {
 			ClientSecretRef: e.OAuthProvider.ClientSecretRef,
 			Scopes:          e.OAuthProvider.Scopes,
 			PKCERequired:    e.OAuthProvider.PKCERequired,
+		}
+	}
+
+	if e.STSConfig != nil {
+		prefix := e.STSConfig.SessionNamePrefix
+		if prefix == "" {
+			prefix = "mcp-proxy-"
+		}
+		duration := e.STSConfig.DurationSeconds
+		if duration == 0 {
+			duration = 900
+		}
+		srv.STSConfig = &gateway.STSConfig{
+			RoleARN:           e.STSConfig.RoleARN,
+			SessionNamePrefix: prefix,
+			DurationSeconds:   duration,
 		}
 	}
 

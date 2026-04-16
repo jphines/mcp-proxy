@@ -2,6 +2,7 @@
 /bin/
 /mcp-proxy
 /policy-test
+/seed-credentials
 
 # Test artifacts
 coverage.out

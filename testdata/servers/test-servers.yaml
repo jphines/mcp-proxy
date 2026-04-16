@@ -52,8 +52,8 @@ servers:
       type: streamable_http
       url: https://infra-mcp.test.internal
     data_tier: 4
-    auth_strategy: sts
-    credential_ref: arn:aws:iam::123456789:role/mcp-infra-role
+    auth_strategy: static
+    credential_ref: infra/api-key
     auth_injection:
       method: header_bearer
     allowed_groups: ["platform-engineering"]

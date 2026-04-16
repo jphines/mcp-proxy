@@ -12,7 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // toolNameSep is the separator used between serverID and toolName in MCP tool names
@@ -27,17 +27,57 @@ const (
 	bearerTokenCtxKey contextKey = iota
 )
 
+// Options configures optional Proxy features beyond the core gateway.Dependencies.
+type Options struct {
+	// ProxyBaseURL is the public base URL of this proxy instance
+	// (e.g. "http://localhost:8080"). Required when DemoJWTURL or Auth0Domain is set.
+	ProxyBaseURL string
+
+	// DemoJWTURL, when non-empty, enables the built-in demo OAuth AS.
+	// Set to the URL of the demo-jwt service (e.g. "http://demo-jwt:9999").
+	// Mutually exclusive with Auth0Domain.
+	DemoJWTURL string
+
+	// Auth0Domain, when non-empty, enables Auth0 as the OAuth AS.
+	// The proxy serves only RFC 8414 metadata pointing at Auth0; Auth0 handles
+	// the full PKCE flow and issues the JWTs the proxy then validates.
+	// Mutually exclusive with DemoJWTURL.
+	Auth0Domain string
+
+	// Auth0ClientID is the Auth0 application client ID returned to Claude Code
+	// via the dynamic client registration stub endpoint.
+	Auth0ClientID string
+
+	// Auth0Audience is the Auth0 API audience. Sent in the Auth0 authorize
+	// request so Auth0 issues a JWT with the correct aud claim.
+	Auth0Audience string
+}
+
 // Proxy orchestrates the MCP proxy: it serves upstream MCP sessions and routes
 // tool calls through the middleware pipeline to downstream MCP servers.
 type Proxy struct {
-	deps     *gateway.Dependencies
-	pipeline gateway.MiddlewareFunc
+	deps         *gateway.Dependencies
+	pipeline     gateway.MiddlewareFunc
+	as           *oauthAS // non-nil only when an OAuth AS is configured
+	requireAuth  bool     // true when an OAuth AS is configured; gate middleware returns 401
+	proxyBaseURL string   // public base URL, used in WWW-Authenticate discovery headers
 }
 
 // New creates a Proxy wired with the full 8-stage middleware pipeline.
 // Pipeline order: audit → auth → route → policy → approval → enrollment → credential → dispatch.
-func New(deps *gateway.Dependencies) *Proxy {
-	p := &Proxy{deps: deps}
+func New(deps *gateway.Dependencies, opts Options) *Proxy {
+	p := &Proxy{
+		deps:         deps,
+		proxyBaseURL: strings.TrimRight(opts.ProxyBaseURL, "/"),
+	}
+	switch {
+	case opts.Auth0Domain != "":
+		p.as = newOAuthASAuth0(opts.ProxyBaseURL, opts.Auth0Domain, opts.Auth0ClientID, opts.Auth0Audience)
+		p.requireAuth = true
+	case opts.DemoJWTURL != "":
+		p.as = newOAuthAS(opts.ProxyBaseURL, opts.DemoJWTURL)
+		p.requireAuth = true
+	}
 	p.pipeline = gateway.BuildPipeline(
 		p.auditMiddleware,
 		p.authMiddleware,
@@ -54,7 +94,12 @@ func New(deps *gateway.Dependencies) *Proxy {
 // GetServer is passed to mcp.NewStreamableHTTPHandler. It authenticates the
 // inbound request, fetches the tool catalog for the identity, and returns an
 // MCP Server with all permitted tools pre-registered.
-// Returning nil rejects the session (the SDK responds with HTTP 401).
+// Returning nil rejects the session (the SDK responds with HTTP 400).
+//
+// Note: unauthenticated and invalid-token requests are rejected with proper
+// HTTP 401 responses by the authGate middleware before reaching this function.
+// GetServer only sees requests that either carry a token (authenticated) or
+// are from an open (no OAuth AS configured) deployment.
 func (p *Proxy) GetServer(r *http.Request) *mcp.Server {
 	ctx := r.Context()
 
@@ -64,7 +109,7 @@ func (p *Proxy) GetServer(r *http.Request) *mcp.Server {
 		var err error
 		identity, err = p.deps.Authenticator.Authenticate(ctx, token)
 		if err != nil {
-			return nil // unauthenticated → reject session
+			return nil // token present but invalid — authGate already handled this case
 		}
 	}
 

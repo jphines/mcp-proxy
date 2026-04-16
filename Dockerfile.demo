@@ -1,0 +1,35 @@
+# Dockerfile.demo — multi-binary builder for demo services.
+# Build argument BINARY selects which cmd/ subdirectory to compile.
+#
+# Usage (docker compose handles this automatically):
+#   docker build --build-arg BINARY=demo-server -t demo-server .
+#   docker build --build-arg BINARY=demo-jwt    -t demo-jwt .
+#   docker build --build-arg BINARY=dashboard   -t dashboard .
+
+ARG BINARY=demo-server
+
+FROM golang:1.26-alpine AS builder
+
+WORKDIR /build
+
+# Cache dependency download separately from source.
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG BINARY
+RUN CGO_ENABLED=0 go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /app \
+    ./cmd/${BINARY}
+
+# ── Runtime image ─────────────────────────────────────────────────────────────
+# Use alpine (not distroless) so healthcheck shell commands work in Compose.
+FROM alpine:3
+
+# wget is available in alpine by default; no extra apk install needed.
+COPY --from=builder /app /app
+
+ENTRYPOINT ["/app"]

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // toolCache is an in-memory, per-server tool list cache with a configurable TTL.

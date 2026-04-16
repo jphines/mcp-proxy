@@ -15,8 +15,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
-	"github.com/ro-eng/mcp-proxy/internal/store"
+	"github.com/jphines/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/internal/store"
 )
 
 // ComputeHash fills event.PrevHash and computes event.Hash in place.

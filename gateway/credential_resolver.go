@@ -12,8 +12,13 @@ const (
 	AuthStrategyXAA AuthStrategy = "xaa"
 	// AuthStrategyStatic resolves a long-lived API key from the vault at org scope.
 	AuthStrategyStatic AuthStrategy = "static"
-	// AuthStrategySTS assumes an AWS IAM role via AssumeRoleWithWebIdentity.
+	// AuthStrategySTS assumes an AWS IAM role via STS AssumeRoleWithWebIdentity,
+	// using the caller's validated JWT as the web identity token.
+	// The resulting temporary credentials are injected into the downstream call.
 	AuthStrategySTS AuthStrategy = "sts"
+	// AuthStrategyNone means no credential is required for the downstream server.
+	// The downstream call is made without any authentication header injection.
+	AuthStrategyNone AuthStrategy = "none"
 )
 
 // CredentialResolver selects and resolves the appropriate credential strategy

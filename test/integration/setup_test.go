@@ -34,17 +34,17 @@ import (
 	"github.com/stretchr/testify/require"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
-	"github.com/ro-eng/mcp-proxy/internal/approval"
-	"github.com/ro-eng/mcp-proxy/internal/audit"
-	"github.com/ro-eng/mcp-proxy/internal/auth"
-	"github.com/ro-eng/mcp-proxy/internal/credential"
-	"github.com/ro-eng/mcp-proxy/internal/oauth"
-	"github.com/ro-eng/mcp-proxy/internal/policy"
-	"github.com/ro-eng/mcp-proxy/internal/proxy"
-	"github.com/ro-eng/mcp-proxy/internal/registry"
-	"github.com/ro-eng/mcp-proxy/internal/store"
-	mcp_fixture "github.com/ro-eng/mcp-proxy/test/mcp_fixture"
+	"github.com/jphines/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/internal/approval"
+	"github.com/jphines/mcp-proxy/internal/audit"
+	"github.com/jphines/mcp-proxy/internal/auth"
+	"github.com/jphines/mcp-proxy/internal/credential"
+	"github.com/jphines/mcp-proxy/internal/oauth"
+	"github.com/jphines/mcp-proxy/internal/policy"
+	"github.com/jphines/mcp-proxy/internal/proxy"
+	"github.com/jphines/mcp-proxy/internal/registry"
+	"github.com/jphines/mcp-proxy/internal/store"
+	mcp_fixture "github.com/jphines/mcp-proxy/test/mcp_fixture"
 )
 
 // testDB is the shared PostgreSQL connection for audit chain tests.
@@ -398,7 +398,9 @@ func newHarness(t *testing.T, policyYAML string, opts ...harnessOptions) *harnes
 		MetricsCollector:   noopMetrics{},
 	}
 
-	p := proxy.New(deps)
+	p := proxy.New(deps, proxy.Options{
+		ProxyBaseURL: proxyURL,
+	})
 
 	// ── 7. Start the HTTP server ───────────────────────────────────────────────
 	proxySrv.Config = p.NewHTTPServer("", approvalHandler)

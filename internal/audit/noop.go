@@ -3,7 +3,7 @@ package audit
 import (
 	"context"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // NoopLogger is a gateway.AuditLogger that silently discards all events.

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // Handler handles POST /approvals/slack/callback from Slack's interactive components.

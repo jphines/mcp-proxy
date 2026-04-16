@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // dispatchMiddleware is the terminal stage of the pipeline. It calls the

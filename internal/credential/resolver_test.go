@@ -8,14 +8,32 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	stypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
+	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
-	"github.com/ro-eng/mcp-proxy/internal/credential"
-	"github.com/ro-eng/mcp-proxy/internal/mocks"
+	"github.com/jphines/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/internal/credential"
+	"github.com/jphines/mcp-proxy/internal/mocks"
 )
+
+// mockSTSClientForResolver returns minimal valid STS output for resolver tests.
+type mockSTSClientForResolver struct{}
+
+func (m *mockSTSClientForResolver) AssumeRoleWithWebIdentity(_ context.Context, _ *sts.AssumeRoleWithWebIdentityInput, _ ...func(*sts.Options)) (*sts.AssumeRoleWithWebIdentityOutput, error) {
+	exp := time.Now().Add(15 * time.Minute)
+	return &sts.AssumeRoleWithWebIdentityOutput{
+		Credentials: &ststypes.Credentials{
+			AccessKeyId:     aws.String("AKIA"),
+			SecretAccessKey: aws.String("secret"),
+			SessionToken:    aws.String("token"),
+			Expiration:      aws.Time(exp),
+		},
+		AssumedRoleUser: &ststypes.AssumedRoleUser{
+			Arn: aws.String("arn:aws:sts::123:assumed-role/R/s"),
+		},
+	}, nil
+}
 
 func newResolver(t *testing.T, store gateway.CredentialStore, enroll gateway.OAuthEnrollment) *credential.CompositeResolver {
 	t.Helper()
@@ -101,6 +119,53 @@ func TestCompositeResolver_Static_NotFound(t *testing.T) {
 	assert.True(t, errors.Is(err, gateway.ErrCredentialNotFound))
 }
 
+// --- STS strategy ---
+
+func TestCompositeResolver_STS_Resolves(t *testing.T) {
+	t.Parallel()
+	store := mocks.NewMockCredentialStore(t)
+	enroll := mocks.NewMockOAuthEnrollment(t)
+
+	// The STS strategy delegates to the STSResolver, so we just need a minimal
+	// mock STS client that returns valid credentials.
+	stsClient := &mockSTSClientForResolver{}
+	stsResolver := credential.NewSTSResolver(stsClient)
+
+	identity := &gateway.Identity{Subject: "alice", RawToken: "jwt-token"}
+	server := &gateway.ServerConfig{
+		ID:       "aws-svc",
+		Strategy: gateway.AuthStrategySTS,
+		STSConfig: &gateway.STSConfig{
+			RoleARN:           "arn:aws:iam::123:role/R",
+			SessionNamePrefix: "mcp-",
+		},
+	}
+
+	r := credential.NewCompositeResolver(store, enroll, stsResolver)
+	cred, err := r.Resolve(context.Background(), identity, server)
+	require.NoError(t, err)
+	assert.Equal(t, gateway.CredTypeIAMRole, cred.Type)
+}
+
+func TestCompositeResolver_STS_NilResolver(t *testing.T) {
+	t.Parallel()
+	store := mocks.NewMockCredentialStore(t)
+	enroll := mocks.NewMockOAuthEnrollment(t)
+
+	server := &gateway.ServerConfig{
+		ID:       "aws-svc",
+		Strategy: gateway.AuthStrategySTS,
+		STSConfig: &gateway.STSConfig{
+			RoleARN: "arn:aws:iam::123:role/R",
+		},
+	}
+
+	r := credential.NewCompositeResolver(store, enroll, nil)
+	_, err := r.Resolve(context.Background(), &gateway.Identity{Subject: "alice", RawToken: "tok"}, server)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no STS client configured")
+}
+
 // --- XAA strategy ---
 
 func TestCompositeResolver_XAA_ReturnsNotSupported(t *testing.T) {
@@ -113,98 +178,6 @@ func TestCompositeResolver_XAA_ReturnsNotSupported(t *testing.T) {
 	_, err := r.Resolve(context.Background(), &gateway.Identity{Subject: "alice"}, server)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, gateway.ErrXAANotSupported))
-}
-
-// --- STS strategy ---
-
-// stubSTSClient implements the unexported stsClient interface via structural typing.
-type stubSTSClient struct {
-	out *sts.AssumeRoleWithWebIdentityOutput
-	err error
-}
-
-func (s *stubSTSClient) AssumeRoleWithWebIdentity(_ context.Context, _ *sts.AssumeRoleWithWebIdentityInput, _ ...func(*sts.Options)) (*sts.AssumeRoleWithWebIdentityOutput, error) {
-	return s.out, s.err
-}
-
-func TestCompositeResolver_STS_ReturnsTempCredential(t *testing.T) {
-	t.Parallel()
-	credStore := mocks.NewMockCredentialStore(t)
-	enroll := mocks.NewMockOAuthEnrollment(t)
-
-	expiry := time.Now().Add(time.Hour)
-	stub := &stubSTSClient{
-		out: &sts.AssumeRoleWithWebIdentityOutput{
-			Credentials: &stypes.Credentials{
-				AccessKeyId:     aws.String("AKIA123"),
-				SecretAccessKey: aws.String("secretXYZ"),
-				SessionToken:    aws.String("sessToken"),
-				Expiration:      &expiry,
-			},
-		},
-	}
-
-	identity := &gateway.Identity{Subject: "alice", RawToken: "jwt.token.here"}
-	server := &gateway.ServerConfig{
-		ID:            "aws-svc",
-		Strategy:      gateway.AuthStrategySTS,
-		CredentialRef: "arn:aws:iam::123456789:role/mcp-proxy-role",
-	}
-
-	r := credential.NewCompositeResolver(credStore, enroll, stub)
-	cred, err := r.Resolve(context.Background(), identity, server)
-	require.NoError(t, err)
-	require.NotNil(t, cred)
-
-	assert.Equal(t, gateway.CredTypeIAMRole, cred.Type)
-	assert.Equal(t, "sessToken", string(cred.Value))
-	assert.Equal(t, "AKIA123", cred.Metadata["access_key_id"])
-	assert.Equal(t, "secretXYZ", cred.Metadata["secret_access_key"])
-	assert.NotNil(t, cred.ExpiresAt)
-}
-
-func TestCompositeResolver_STS_NoClient_ReturnsError(t *testing.T) {
-	t.Parallel()
-	credStore := mocks.NewMockCredentialStore(t)
-	enroll := mocks.NewMockOAuthEnrollment(t)
-
-	server := &gateway.ServerConfig{ID: "aws-svc", Strategy: gateway.AuthStrategySTS}
-	// newResolver passes nil for stsClient
-	r := newResolver(t, credStore, enroll)
-	_, err := r.Resolve(context.Background(), &gateway.Identity{Subject: "alice"}, server)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "STS client not configured")
-}
-
-func TestCompositeResolver_STS_NilIdentity_ReturnsError(t *testing.T) {
-	t.Parallel()
-	credStore := mocks.NewMockCredentialStore(t)
-	enroll := mocks.NewMockOAuthEnrollment(t)
-
-	stub := &stubSTSClient{}
-	server := &gateway.ServerConfig{ID: "aws-svc", Strategy: gateway.AuthStrategySTS}
-	r := credential.NewCompositeResolver(credStore, enroll, stub)
-	_, err := r.Resolve(context.Background(), nil, server)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "authenticated identity")
-}
-
-func TestCompositeResolver_STS_ProviderError_ReturnsError(t *testing.T) {
-	t.Parallel()
-	credStore := mocks.NewMockCredentialStore(t)
-	enroll := mocks.NewMockOAuthEnrollment(t)
-
-	stub := &stubSTSClient{err: errors.New("STS unavailable")}
-	identity := &gateway.Identity{Subject: "bob", RawToken: "tok"}
-	server := &gateway.ServerConfig{
-		ID:            "aws-svc",
-		Strategy:      gateway.AuthStrategySTS,
-		CredentialRef: "arn:aws:iam::123:role/test",
-	}
-	r := credential.NewCompositeResolver(credStore, enroll, stub)
-	_, err := r.Resolve(context.Background(), identity, server)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "AssumeRoleWithWebIdentity")
 }
 
 // --- Unknown strategy ---

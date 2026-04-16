@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // authMiddleware extracts the bearer token from the context (placed there by

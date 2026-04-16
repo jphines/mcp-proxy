@@ -7,7 +7,7 @@ import (
 
 	"github.com/sony/gobreaker"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // circuitBreakerMap manages a per-server gobreaker.CircuitBreaker.

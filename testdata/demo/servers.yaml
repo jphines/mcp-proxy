@@ -1,0 +1,72 @@
+servers:
+  # ── tools server (tier 2) ─────────────────────────────────────────────────
+  # Low-risk read/write tools: weather, search, reports.
+  # Open to all authenticated callers.
+  - id: tools
+    name: Demo Tools Server
+    transport:
+      type: streamable_http
+      url: http://demo-server:3000
+    data_tier: 2
+    auth_strategy: none
+    auth_injection: {}
+    allowed_groups: []
+    enabled: true
+    circuit_breaker:
+      failure_threshold: 3
+      reset_timeout: 15s
+      half_open_max: 2
+
+  # ── infra server (tier 3) ─────────────────────────────────────────────────
+  # Higher-risk operational tools: database queries, service scaling, record deletion.
+  # Accessible to platform-eng and data-platform groups.
+  - id: infra
+    name: Demo Infrastructure Server
+    transport:
+      type: streamable_http
+      url: http://demo-server:3000
+    data_tier: 3
+    auth_strategy: none
+    auth_injection: {}
+    allowed_groups: []
+    enabled: true
+    circuit_breaker:
+      failure_threshold: 3
+      reset_timeout: 15s
+      half_open_max: 2
+
+  # ── google workspace server ────────────────────────────────────────────────
+  # Google Calendar + Docs tools via OAuth credential injection.
+  # The proxy enrolls each user through Google's OAuth flow and injects their
+  # access token as Authorization: Bearer on every downstream call.
+  #
+  # GOOGLE_CLIENT_ID is expanded from the environment at load time.
+  # The client secret is seeded into the credential store by the seed-credentials
+  # init service in docker-compose.demo.yml.
+  - id: google
+    name: Google Workspace
+    transport:
+      type: streamable_http
+      url: http://google-server:4000
+    data_tier: 3
+    auth_strategy: oauth
+    oauth_provider:
+      auth_url: https://accounts.google.com/o/oauth2/v2/auth
+      token_url: https://oauth2.googleapis.com/token
+      revoke_url: https://oauth2.googleapis.com/revoke
+      client_id: ${GOOGLE_CLIENT_ID}
+      client_secret_ref: google/oauth-client-secret
+      scopes:
+        - https://www.googleapis.com/auth/calendar
+        - https://www.googleapis.com/auth/documents
+        - https://www.googleapis.com/auth/drive.readonly
+        - https://www.googleapis.com/auth/drive.file
+      pkce_required: true
+    auth_injection:
+      method: header_bearer
+    allowed_groups: []
+    enabled: true
+    circuit_breaker:
+      failure_threshold: 3
+      reset_timeout: 30s
+      half_open_max: 1

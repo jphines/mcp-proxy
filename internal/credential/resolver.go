@@ -5,38 +5,29 @@ package credential
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
-
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
-
-// stsClient is a minimal interface over the STS SDK client.
-type stsClient interface {
-	AssumeRoleWithWebIdentity(ctx context.Context, params *sts.AssumeRoleWithWebIdentityInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleWithWebIdentityOutput, error)
-}
 
 // CompositeResolver implements gateway.CredentialResolver by routing to the
 // appropriate sub-strategy based on the server's AuthStrategy.
 type CompositeResolver struct {
 	store      gateway.CredentialStore
 	enrollment gateway.OAuthEnrollment
-	stsClient  stsClient
+	sts        *STSResolver
 }
 
-// NewCompositeResolver creates a resolver with all strategies available.
-// stsClient may be nil when STS strategy servers are not configured.
+// NewCompositeResolver creates a resolver with OAuth, static, STS, and XAA strategies.
+// stsResolver may be nil if STS is not configured.
 func NewCompositeResolver(
 	store gateway.CredentialStore,
 	enrollment gateway.OAuthEnrollment,
-	stsClient stsClient,
+	stsResolver *STSResolver,
 ) *CompositeResolver {
 	return &CompositeResolver{
 		store:      store,
 		enrollment: enrollment,
-		stsClient:  stsClient,
+		sts:        stsResolver,
 	}
 }
 
@@ -45,8 +36,8 @@ func NewCompositeResolver(
 //
 //	oauth  → check enrollment → return current access token (or EnrollmentRequiredError)
 //	static → org-scope credential store lookup
-//	sts    → AssumeRoleWithWebIdentity using the caller's JWT
 //	xaa    → ErrXAANotSupported (Phase 1 stub)
+//	none   → empty credential (no injection)
 func (r *CompositeResolver) Resolve(ctx context.Context, identity *gateway.Identity, server *gateway.ServerConfig) (*gateway.Credential, error) {
 	switch server.Strategy {
 	case gateway.AuthStrategyOAuth:
@@ -57,6 +48,8 @@ func (r *CompositeResolver) Resolve(ctx context.Context, identity *gateway.Ident
 		return r.resolveSTS(ctx, identity, server)
 	case gateway.AuthStrategyXAA:
 		return nil, gateway.ErrXAANotSupported
+	case gateway.AuthStrategyNone:
+		return &gateway.Credential{}, nil
 	default:
 		return nil, fmt.Errorf("credential: unknown auth strategy %q for server %s", server.Strategy, server.ID)
 	}
@@ -72,6 +65,14 @@ func (r *CompositeResolver) resolveOAuth(ctx context.Context, identity *gateway.
 	return cred, nil
 }
 
+// resolveSTS exchanges the caller's JWT for temporary AWS credentials via AssumeRoleWithWebIdentity.
+func (r *CompositeResolver) resolveSTS(ctx context.Context, identity *gateway.Identity, server *gateway.ServerConfig) (*gateway.Credential, error) {
+	if r.sts == nil {
+		return nil, fmt.Errorf("credential: STS strategy requested for server %s but no STS client configured", server.ID)
+	}
+	return r.sts.Resolve(ctx, identity, server)
+}
+
 // resolveStatic fetches a long-lived API key from the credential store at org scope.
 func (r *CompositeResolver) resolveStatic(ctx context.Context, server *gateway.ServerConfig) (*gateway.Credential, error) {
 	cred, err := r.store.Resolve(ctx, nil, server.CredentialRef)
@@ -79,56 +80,6 @@ func (r *CompositeResolver) resolveStatic(ctx context.Context, server *gateway.S
 		return nil, fmt.Errorf("credential: resolving static credential for %s: %w", server.ID, err)
 	}
 	return cred, nil
-}
-
-// resolveSTS calls AssumeRoleWithWebIdentity using the caller's JWT and returns
-// temporary AWS credentials (access key ID, secret, session token) as a JSON-encoded
-// value. The dispatch middleware injects these as AWS environment variables.
-func (r *CompositeResolver) resolveSTS(ctx context.Context, identity *gateway.Identity, server *gateway.ServerConfig) (*gateway.Credential, error) {
-	if r.stsClient == nil {
-		return nil, fmt.Errorf("credential: STS client not configured for server %s", server.ID)
-	}
-	if identity == nil {
-		return nil, fmt.Errorf("credential: STS strategy requires an authenticated identity")
-	}
-
-	roleARN := server.CredentialRef
-	sessionName := "mcp-proxy-" + identity.Subject
-	if len(sessionName) > 64 {
-		sessionName = sessionName[:64]
-	}
-
-	out, err := r.stsClient.AssumeRoleWithWebIdentity(ctx, &sts.AssumeRoleWithWebIdentityInput{
-		RoleArn:          aws.String(roleARN),
-		RoleSessionName:  aws.String(sessionName),
-		WebIdentityToken: aws.String(identity.RawToken),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("credential: AssumeRoleWithWebIdentity for %s: %w", server.ID, err)
-	}
-
-	creds := out.Credentials
-	if creds == nil {
-		return nil, fmt.Errorf("credential: STS returned nil credentials for %s", server.ID)
-	}
-
-	// Encode the three STS fields as metadata so dispatch can inject them.
-	var expiresAt *time.Time
-	if creds.Expiration != nil {
-		t := *creds.Expiration
-		expiresAt = &t
-	}
-
-	return &gateway.Credential{
-		Type:  gateway.CredTypeIAMRole,
-		Value: []byte(aws.ToString(creds.SessionToken)),
-		ExpiresAt: expiresAt,
-		Metadata: map[string]string{
-			"access_key_id":     aws.ToString(creds.AccessKeyId),
-			"secret_access_key": aws.ToString(creds.SecretAccessKey),
-			"session_token":     aws.ToString(creds.SessionToken),
-		},
-	}, nil
 }
 
 var _ gateway.CredentialResolver = (*CompositeResolver)(nil)

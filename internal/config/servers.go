@@ -25,6 +25,7 @@ type ServerEntry struct {
 	AuthStrategy  string                 `yaml:"auth_strategy"`
 	CredentialRef string                 `yaml:"credential_ref"`
 	OAuthProvider *OAuthProviderEntry    `yaml:"oauth_provider,omitempty"`
+	STSConfig     *STSConfigEntry        `yaml:"sts_config,omitempty"`
 	AuthInjection AuthInjectionEntry     `yaml:"auth_injection"`
 	AllowedGroups []string               `yaml:"allowed_groups"`
 	Enabled       *bool                  `yaml:"enabled"`
@@ -61,6 +62,13 @@ type AuthInjectionEntry struct {
 	QueryParam string `yaml:"query_param"`
 }
 
+// STSConfigEntry is the YAML representation of an STS AssumeRoleWithWebIdentity configuration.
+type STSConfigEntry struct {
+	RoleARN           string `yaml:"role_arn"`
+	SessionNamePrefix string `yaml:"session_name_prefix"`
+	DurationSeconds   int32  `yaml:"duration_seconds"`
+}
+
 // CircuitBreakerEntry is the YAML representation of circuit breaker configuration.
 type CircuitBreakerEntry struct {
 	FailureThreshold int    `yaml:"failure_threshold"`
@@ -77,8 +85,9 @@ var validTransportTypes = map[string]bool{
 var validAuthStrategies = map[string]bool{
 	"oauth":  true,
 	"xaa":    true,
-	"static": true,
 	"sts":    true,
+	"static": true,
+	"none":   true,
 }
 
 var validInjectionMethods = map[string]bool{
@@ -89,6 +98,9 @@ var validInjectionMethods = map[string]bool{
 }
 
 // LoadServers reads and validates servers.yaml from the given path.
+// Environment variable references of the form ${VAR} or $VAR in the YAML are
+// expanded before parsing, allowing deployment-specific values (e.g. client IDs)
+// to be supplied via the process environment without modifying the file.
 // Returns a validated ServersFile or an error aggregating all validation failures.
 func LoadServers(path string) (*ServersFile, error) {
 	data, err := os.ReadFile(path)
@@ -96,8 +108,11 @@ func LoadServers(path string) (*ServersFile, error) {
 		return nil, fmt.Errorf("reading servers file: %w", err)
 	}
 
+	// Expand ${VAR} / $VAR references before YAML parsing.
+	expanded := os.ExpandEnv(string(data))
+
 	var sf ServersFile
-	if err := yaml.Unmarshal(data, &sf); err != nil {
+	if err := yaml.Unmarshal([]byte(expanded), &sf); err != nil {
 		return nil, fmt.Errorf("parsing servers YAML: %w", err)
 	}
 
@@ -153,6 +168,13 @@ func validateServersFile(sf *ServersFile) error {
 		if s.AuthStrategy == "static" && s.CredentialRef == "" {
 			errs = append(errs, fmt.Errorf("%s: credential_ref is required for static auth_strategy", prefix))
 		}
+		if s.AuthStrategy == "sts" {
+			if s.STSConfig == nil {
+				errs = append(errs, fmt.Errorf("%s: sts_config is required for sts auth_strategy", prefix))
+			} else {
+				errs = append(errs, validateSTSConfig(prefix, s.STSConfig)...)
+			}
+		}
 
 		if s.AuthInjection.Method != "" && !validInjectionMethods[s.AuthInjection.Method] {
 			errs = append(errs, fmt.Errorf("%s: auth_injection.method must be one of %v, got %q",
@@ -186,6 +208,17 @@ func validateOAuthProvider(prefix string, p *OAuthProviderEntry) []error {
 	}
 	if len(p.Scopes) == 0 {
 		errs = append(errs, fmt.Errorf("%s: oauth_provider.scopes must have at least one entry", prefix))
+	}
+	return errs
+}
+
+func validateSTSConfig(prefix string, c *STSConfigEntry) []error {
+	var errs []error
+	if c.RoleARN == "" {
+		errs = append(errs, fmt.Errorf("%s: sts_config.role_arn is required", prefix))
+	}
+	if c.DurationSeconds != 0 && (c.DurationSeconds < 900 || c.DurationSeconds > 43200) {
+		errs = append(errs, fmt.Errorf("%s: sts_config.duration_seconds must be 900-43200 if set, got %d", prefix, c.DurationSeconds))
 	}
 	return errs
 }

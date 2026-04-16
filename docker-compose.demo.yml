@@ -1,0 +1,238 @@
+---
+# docker-compose.demo.yml — self-contained demo for mcp-proxy.
+#
+# Services:
+#   postgres         PostgreSQL 16 audit + credential database
+#   demo-jwt         Local JWT issuer (no Okta required)
+#   demo-server      In-process MCP server with 6 demo tools
+#   google-server    MCP server for Google Calendar + Docs (real API calls)
+#   seed-credentials One-shot init: stores Google OAuth client secret in DB
+#   proxy            The mcp-proxy binary (plain HTTP, no TLS)
+#   dashboard        Live audit dashboard + mock Slack auto-approver
+#
+# Quick start (demo tools only, no Google):
+#   docker compose -f docker-compose.demo.yml up --build
+#
+# Full start (includes Google Calendar + Docs):
+#   GOOGLE_CLIENT_ID=xxx GOOGLE_CLIENT_SECRET=yyy \
+#     docker compose -f docker-compose.demo.yml up --build
+#
+# Open:
+#   http://localhost:9090     ← dashboard
+#   http://localhost:9999/token ← get a JWT
+#   http://localhost:8080/mcp   ← proxy MCP endpoint
+#   http://localhost:8080/oauth/enroll/google ← enroll Google OAuth
+
+name: mcp-proxy-demo
+
+services:
+
+  # ── PostgreSQL 16 ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mcpproxy
+      POSTGRES_USER: mcpproxy
+      POSTGRES_PASSWORD: demosecret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcpproxy -d mcpproxy"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Demo JWT issuer ────────────────────────────────────────────────────────
+  demo-jwt:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+      args:
+        BINARY: demo-jwt
+    environment:
+      LISTEN_ADDR: ":9999"
+      DEMO_ISSUER: "http://demo-jwt:9999"
+      DEMO_AUDIENCE: "api://mcp-proxy-demo"
+    ports:
+      - "9999:9999"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9999/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Demo MCP downstream server ─────────────────────────────────────────────
+  demo-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+      args:
+        BINARY: demo-server
+    environment:
+      LISTEN_ADDR: ":3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ── Google Workspace MCP server ────────────────────────────────────────────
+  # Exposes 7 tools (3 calendar, 4 docs) that call the real Google APIs.
+  # The proxy injects the user's Google OAuth access token as Authorization: Bearer.
+  # This service works even when GOOGLE_CLIENT_ID/SECRET are not set —
+  # any calls simply fail with a 401 from Google until a user has enrolled.
+  google-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+      args:
+        BINARY: google-server
+    environment:
+      LISTEN_ADDR: ":4000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ── Credential seeder (one-shot init) ──────────────────────────────────────
+  # Seeds the Google OAuth client secret into the PostgreSQL credential store
+  # so the proxy can resolve it during the OAuth enrollment flow.
+  # Exits 0 on success and is not restarted.
+  # Skip by omitting GOOGLE_CLIENT_SECRET from the environment.
+  seed-credentials:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+      args:
+        BINARY: seed-credentials
+    environment:
+      DATABASE_URL: "postgres://mcpproxy:demosecret@postgres:5432/mcpproxy?sslmode=disable"
+      CREDENTIAL_ENCRYPTION_KEY: "demo-credential-encryption-key-for-local-use!!"
+      CREDENTIAL_SERVICE_ID: "google/oauth-client-secret"
+      CREDENTIAL_SECRET_VALUE: "${GOOGLE_CLIENT_SECRET:-not-configured}"
+      CREDENTIAL_TYPE: "api_key"
+    depends_on:
+      proxy:
+        condition: service_healthy
+    restart: "no"
+
+  # ── Dashboard + mock Slack approver ────────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+      args:
+        BINARY: dashboard
+    environment:
+      LISTEN_ADDR: ":9090"
+      DATABASE_URL: "postgres://mcpproxy:demosecret@postgres:5432/mcpproxy?sslmode=disable"
+      PROXY_INTERNAL_URL: "http://proxy:8080"
+      SLACK_SIGNING_SECRET: "demo-slack-signing-secret-for-local-use"
+      AUTO_APPROVE_DELAY: "4s"
+    ports:
+      - "9090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── MCP Proxy ──────────────────────────────────────────────────────────────
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      LISTEN_ADDR: ":8080"
+
+      # Auth: point at the local demo-jwt issuer.
+      OKTA_ISSUER: "http://demo-jwt:9999"
+      OKTA_AUDIENCE: "api://mcp-proxy-demo"
+
+      # Database.
+      DATABASE_URL: "postgres://mcpproxy:demosecret@postgres:5432/mcpproxy?sslmode=disable"
+
+      # Credential encryption key (must match seed-credentials service).
+      CREDENTIAL_ENCRYPTION_KEY: "demo-credential-encryption-key-for-local-use!!"
+
+      # Config files (mounted below).
+      CONFIG_DIR: "/config"
+
+      # OAuth callback base URL. Use localhost so the host browser can follow
+      # the redirect after authorising with Google.
+      PROXY_BASE_URL: "http://localhost:8080"
+
+      WORKSPACE: "dev"
+      INSTANCE_ID: "demo-instance-01"
+
+      # HMAC secret for OAuth state parameter signing (32+ chars required).
+      STATE_HMAC_SECRET: "demo-hmac-secret-at-least-32-bytes-long!!"
+
+      # Slack — pointed at the dashboard's mock-slack handler.
+      SLACK_WEBHOOK_URL: "http://dashboard:9090/mock-slack"
+      SLACK_SIGNING_SECRET: "demo-slack-signing-secret-for-local-use"
+
+      # ── OAuth AS mode (choose one) ────────────────────────────────────────────
+      #
+      # Option A — demo-jwt (default, no setup required):
+      #   DEMO_JWT_URL points at the local demo-jwt service. The proxy serves its
+      #   own login form at /oauth/authorize. No real IdP needed.
+      DEMO_JWT_URL: "${DEMO_JWT_URL-http://demo-jwt:9999}"
+      #
+      # Option B — Auth0 (real IdP, one-time setup):
+      #   Add these three lines to .env.demo to switch to Auth0:
+      #     AUTH0_DOMAIN=your-tenant.us.auth0.com
+      #     AUTH0_CLIENT_ID=your-app-client-id
+      #     AUTH0_AUDIENCE=https://api/mcp-proxy
+      #   Auth0 setup checklist:
+      #     1. https://auth0.com → free account
+      #     2. Applications → Create App → Single Page Application
+      #        Allowed Callback URLs: http://localhost  (matches any port)
+      #     3. APIs → Create → set identifier = AUTH0_AUDIENCE value above
+      #     4. Actions → Flows → Login → Create Action:
+      #           exports.onExecutePostLogin = async (event, api) => {
+      #             api.accessToken.setCustomClaim(
+      #               'https://mcp-proxy/groups', event.authorization?.roles ?? []);
+      #             api.accessToken.setCustomClaim(
+      #               'https://mcp-proxy/type', 'human');
+      #           };
+      #        (also assign roles to users in User Management → Roles)
+      #   When AUTH0_DOMAIN is set, DEMO_JWT_URL is ignored.
+      AUTH0_DOMAIN: "${AUTH0_DOMAIN:-}"
+      AUTH0_CLIENT_ID: "${AUTH0_CLIENT_ID:-}"
+      AUTH0_AUDIENCE: "${AUTH0_AUDIENCE:-}"
+
+      # Google OAuth client ID (public; the secret is stored via seed-credentials).
+      # Set via: GOOGLE_CLIENT_ID=xxx docker compose ... up
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-not-configured}"
+
+      LOG_LEVEL: "info"
+
+    volumes:
+      - ./testdata/demo:/config:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      demo-jwt:
+        condition: service_healthy
+      demo-server:
+        condition: service_started
+      dashboard:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata:

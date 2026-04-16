@@ -7,13 +7,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ro-eng/mcp-proxy/internal/config"
+	"github.com/jphines/mcp-proxy/internal/config"
 )
 
 func TestLoadFromEnv_MissingRequired(t *testing.T) {
 	// Clear all config env vars.
 	vars := []string{
-		"OKTA_ISSUER", "OKTA_AUDIENCE", "DATABASE_URL", "AWS_REGION",
+		"OKTA_ISSUER", "OKTA_AUDIENCE", "DATABASE_URL", "CREDENTIAL_ENCRYPTION_KEY",
 		"CONFIG_DIR", "PROXY_BASE_URL", "WORKSPACE", "STATE_HMAC_SECRET",
 		"SLACK_WEBHOOK_URL", "SLACK_SIGNING_SECRET",
 	}
@@ -180,6 +180,136 @@ rules:
 	assert.Contains(t, err.Error(), "approval block is required")
 }
 
+// --- STS config validation ---
+
+func TestLoadServers_STSValid(t *testing.T) {
+	yaml := `
+servers:
+  - id: aws-bedrock
+    name: AWS Bedrock
+    transport:
+      type: streamable_http
+      url: https://bedrock-mcp.internal
+    data_tier: 3
+    auth_strategy: sts
+    sts_config:
+      role_arn: arn:aws:iam::123456789012:role/BedrockAccess
+      session_name_prefix: mcp-
+      duration_seconds: 900
+    auth_injection:
+      method: header_bearer
+    enabled: true
+`
+	f := writeTempFile(t, yaml)
+	sf, err := config.LoadServers(f)
+	require.NoError(t, err)
+	require.Len(t, sf.Servers, 1)
+	require.NotNil(t, sf.Servers[0].STSConfig)
+	assert.Equal(t, "arn:aws:iam::123456789012:role/BedrockAccess", sf.Servers[0].STSConfig.RoleARN)
+}
+
+func TestLoadServers_STSMissingConfig(t *testing.T) {
+	yaml := `
+servers:
+  - id: aws-svc
+    name: AWS Service
+    transport:
+      type: streamable_http
+      url: https://test.internal
+    auth_strategy: sts
+`
+	f := writeTempFile(t, yaml)
+	_, err := config.LoadServers(f)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sts_config is required")
+}
+
+func TestLoadServers_STSMissingRoleARN(t *testing.T) {
+	yaml := `
+servers:
+  - id: aws-svc
+    name: AWS Service
+    transport:
+      type: streamable_http
+      url: https://test.internal
+    auth_strategy: sts
+    sts_config:
+      session_name_prefix: mcp-
+`
+	f := writeTempFile(t, yaml)
+	_, err := config.LoadServers(f)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "role_arn is required")
+}
+
+func TestLoadServers_STSInvalidDuration(t *testing.T) {
+	yaml := `
+servers:
+  - id: aws-svc
+    name: AWS Service
+    transport:
+      type: streamable_http
+      url: https://test.internal
+    auth_strategy: sts
+    sts_config:
+      role_arn: arn:aws:iam::123456789012:role/Test
+      duration_seconds: 100
+`
+	f := writeTempFile(t, yaml)
+	_, err := config.LoadServers(f)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duration_seconds must be 900-43200")
+}
+
+// --- Credential backend config ---
+
+func TestLoadFromEnv_CredentialBackendPostgresDefault(t *testing.T) {
+	setMinimalEnv(t)
+	cfg, err := config.LoadFromEnv()
+	require.NoError(t, err)
+	assert.Equal(t, "postgres", cfg.CredentialBackend)
+}
+
+func TestLoadFromEnv_CredentialBackendSecretsManager(t *testing.T) {
+	setMinimalEnv(t)
+	t.Setenv("CREDENTIAL_BACKEND", "secretsmanager")
+	// secretsmanager backend doesn't require CREDENTIAL_ENCRYPTION_KEY
+	t.Setenv("CREDENTIAL_ENCRYPTION_KEY", "")
+	cfg, err := config.LoadFromEnv()
+	require.NoError(t, err)
+	assert.Equal(t, "secretsmanager", cfg.CredentialBackend)
+}
+
+func TestLoadFromEnv_CredentialBackendInvalid(t *testing.T) {
+	setMinimalEnv(t)
+	t.Setenv("CREDENTIAL_BACKEND", "vault")
+	_, err := config.LoadFromEnv()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CREDENTIAL_BACKEND")
+}
+
+func TestLoadFromEnv_Auth0OverridesOktaFields(t *testing.T) {
+	setMinimalEnv(t)
+	t.Setenv("AUTH0_DOMAIN", "dev-test.us.auth0.com")
+	t.Setenv("AUTH0_CLIENT_ID", "client123")
+	t.Setenv("AUTH0_AUDIENCE", "")
+	cfg, err := config.LoadFromEnv()
+	require.NoError(t, err)
+	assert.Equal(t, "https://dev-test.us.auth0.com/", cfg.OktaIssuer)
+	assert.Equal(t, "client123", cfg.OktaAudience, "when Auth0Audience empty, OktaAudience = Auth0ClientID")
+	assert.Equal(t, "https://mcp-proxy/groups", cfg.Auth0GroupsClaim)
+}
+
+func TestLoadFromEnv_Auth0WithAudience(t *testing.T) {
+	setMinimalEnv(t)
+	t.Setenv("AUTH0_DOMAIN", "dev-test.us.auth0.com")
+	t.Setenv("AUTH0_CLIENT_ID", "client123")
+	t.Setenv("AUTH0_AUDIENCE", "https://api/mcp-proxy")
+	cfg, err := config.LoadFromEnv()
+	require.NoError(t, err)
+	assert.Equal(t, "https://api/mcp-proxy", cfg.OktaAudience)
+}
+
 // --- helpers ---
 
 func setMinimalEnv(t *testing.T) {
@@ -187,7 +317,7 @@ func setMinimalEnv(t *testing.T) {
 	t.Setenv("OKTA_ISSUER", "https://ro.okta.com/oauth2/default")
 	t.Setenv("OKTA_AUDIENCE", "api://mcp-proxy")
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db")
-	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("CREDENTIAL_ENCRYPTION_KEY", "this-is-a-32-byte-cred-encrypt-key!")
 	t.Setenv("CONFIG_DIR", "/etc/mcp-proxy")
 	t.Setenv("PROXY_BASE_URL", "https://mcp-proxy.ro.com")
 	t.Setenv("WORKSPACE", "production")

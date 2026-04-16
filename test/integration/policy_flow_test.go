@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
-	"github.com/ro-eng/mcp-proxy/internal/approval"
-	mcp_fixture "github.com/ro-eng/mcp-proxy/test/mcp_fixture"
+	"github.com/jphines/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/internal/approval"
+	mcp_fixture "github.com/jphines/mcp-proxy/test/mcp_fixture"
 )
 
 // denyTier3Policy denies tool calls on servers with data_tier >= 3.

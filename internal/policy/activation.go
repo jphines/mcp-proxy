@@ -1,7 +1,7 @@
 package policy
 
 import (
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // buildActivation constructs the map of CEL variable bindings from an Identity,

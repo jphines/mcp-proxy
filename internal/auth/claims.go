@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 const (
@@ -18,9 +18,11 @@ const (
 	claimIdentityType = "x-identity-type"
 )
 
-// extractGroups reads group membership from the "groups" claim.
-func extractGroups(claims map[string]any) []string {
-	raw, ok := claims[claimGroups]
+// extractGroups reads group membership from the given claim key.
+// claimKey is typically "groups" (Okta/demo-jwt) or a namespace claim such as
+// "https://mcp-proxy/groups" (Auth0 Post-Login Action).
+func extractGroups(claims map[string]any, claimKey string) []string {
+	raw, ok := claims[claimKey]
 	if !ok {
 		return nil
 	}

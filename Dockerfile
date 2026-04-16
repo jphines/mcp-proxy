@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /build
 
@@ -15,7 +15,9 @@ RUN CGO_ENABLED=0 go build \
     ./cmd/mcp-proxy
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12:nonroot
+# alpine is used here so docker-compose healthchecks (wget) work in the demo.
+# For production, swap to gcr.io/distroless/static-debian12:nonroot.
+FROM alpine:3
 
 COPY --from=builder /build/mcp-proxy /mcp-proxy
 

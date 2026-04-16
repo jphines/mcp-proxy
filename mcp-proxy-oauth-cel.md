@@ -114,7 +114,7 @@ import (
 
     "golang.org/x/oauth2"
 
-    "github.com/ro-eng/mcp-proxy/gateway"
+    "github.com/jphines/mcp-proxy/gateway"
 )
 
 // enrollment implements gateway.OAuthEnrollment
@@ -449,7 +449,7 @@ import (
     "github.com/google/cel-go/common/types"
     "github.com/google/cel-go/common/types/ref"
 
-    "github.com/ro-eng/mcp-proxy/gateway"
+    "github.com/jphines/mcp-proxy/gateway"
 )
 
 // NewCELEnv builds the CEL environment with the variables and
@@ -646,7 +646,7 @@ import (
     "github.com/google/cel-go/cel"
     "gopkg.in/yaml.v3"
 
-    "github.com/ro-eng/mcp-proxy/gateway"
+    "github.com/jphines/mcp-proxy/gateway"
 )
 
 // compiledRule is a policy rule with its CEL expression pre-compiled.

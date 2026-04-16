@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCP Proxy — Live Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e2e8f0;
+      --muted: #8892a4;
+      --allow: #22c55e;
+      --deny: #ef4444;
+      --approval: #f59e0b;
+      --log: #3b82f6;
+      --accent: #6366f1;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo svg { width: 28px; height: 28px; }
+    .logo h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.3px; }
+    .logo span { color: var(--accent); }
+    .status-pill {
+      display: flex; align-items: center; gap: 6px;
+      background: #16213e; border: 1px solid #1e3a5f;
+      border-radius: 20px; padding: 4px 12px;
+      font-size: 12px; color: var(--allow);
+    }
+    .pulse {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--allow);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ── Stats row ── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .stat-card .label {
+      font-size: 11px; font-weight: 500; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); margin-bottom: 8px;
+    }
+    .stat-card .value {
+      font-size: 28px; font-weight: 700; letter-spacing: -0.5px;
+    }
+    .stat-card.allow .value  { color: var(--allow); }
+    .stat-card.deny  .value  { color: var(--deny); }
+    .stat-card.approval .value { color: var(--approval); }
+    .stat-card.log   .value  { color: var(--log); }
+
+    /* ── Event feed ── */
+    .feed-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px 12px;
+    }
+    .feed-header h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .refresh-ts { font-size: 11px; color: var(--muted); }
+
+    .table-wrap {
+      overflow-x: auto;
+      padding: 0 24px 24px;
+    }
+    table {
+      width: 100%; border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead th {
+      text-align: left; padding: 8px 12px;
+      font-size: 11px; font-weight: 500; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    tbody tr:hover { background: var(--surface); }
+    tbody td { padding: 9px 12px; vertical-align: middle; }
+
+    .badge {
+      display: inline-flex; align-items: center;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 4px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .badge.allow    { background: rgba(34,197,94,0.12);  color: var(--allow); }
+    .badge.deny     { background: rgba(239,68,68,0.12);  color: var(--deny); }
+    .badge.require_approval { background: rgba(245,158,11,0.12); color: var(--approval); }
+    .badge.log      { background: rgba(59,130,246,0.12); color: var(--log); }
+
+    .type-badge {
+      display: inline-flex; align-items: center;
+      font-size: 10px; font-weight: 500;
+      padding: 1px 6px; border-radius: 3px;
+      background: rgba(99,102,241,0.12); color: var(--accent);
+    }
+
+    .tool-name { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; color: var(--text); }
+    .caller    { color: var(--muted); font-size: 12px; }
+    .ts        { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .latency   { color: var(--muted); font-size: 11px; text-align: right; }
+    .reason    { color: var(--muted); font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .empty-row td {
+      text-align: center; padding: 48px; color: var(--muted);
+    }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center; padding: 16px; font-size: 11px;
+      color: var(--muted); border-top: 1px solid var(--border);
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 28 28" fill="none">
+      <rect width="28" height="28" rx="7" fill="#6366f1" opacity="0.15"/>
+      <path d="M7 14h14M14 7v14" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="14" cy="14" r="4" stroke="#6366f1" stroke-width="1.5"/>
+    </svg>
+    <h1>MCP <span>Proxy</span> Dashboard</h1>
+  </div>
+  <div class="status-pill">
+    <div class="pulse"></div>
+    <span>Live</span>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat-card allow">
+    <div class="label">Allowed</div>
+    <div class="value" id="stat-allow">—</div>
+  </div>
+  <div class="stat-card deny">
+    <div class="label">Denied</div>
+    <div class="value" id="stat-deny">—</div>
+  </div>
+  <div class="stat-card approval">
+    <div class="label">Approvals</div>
+    <div class="value" id="stat-approval">—</div>
+  </div>
+  <div class="stat-card log">
+    <div class="label">Logged</div>
+    <div class="value" id="stat-log">—</div>
+  </div>
+</div>
+
+<div class="feed-header">
+  <h2>Recent Tool Calls</h2>
+  <span class="refresh-ts" id="refresh-ts">–</span>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Caller</th>
+        <th>Type</th>
+        <th>Tool</th>
+        <th>Decision</th>
+        <th>Rule / Reason</th>
+        <th style="text-align:right">Latency</th>
+      </tr>
+    </thead>
+    <tbody id="event-body">
+      <tr class="empty-row"><td colspan="7">Waiting for events…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<footer>
+  <a href="https://github.com/jphines/mcp-proxy">github.com/jphines/mcp-proxy</a>
+  &nbsp;·&nbsp; Proxy at <code>localhost:8080</code>
+  &nbsp;·&nbsp; JWT issuer at <code>localhost:9999</code>
+</footer>
+
+<script>
+  function fmt(ts) {
+    const d = new Date(ts);
+    return d.toLocaleTimeString('en-US', {hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit'}) +
+           '.' + String(d.getMilliseconds()).padStart(3,'0');
+  }
+
+  function badge(decision) {
+    const label = decision === 'require_approval' ? 'approval' : decision;
+    return `<span class="badge ${decision}">${label}</span>`;
+  }
+
+  async function refresh() {
+    try {
+      const [eventsRes, statsRes] = await Promise.all([
+        fetch('/api/events'),
+        fetch('/api/stats'),
+      ]);
+      const events = await eventsRes.json();
+      const stats  = await statsRes.json();
+
+      document.getElementById('stat-allow').textContent    = stats.allow    ?? 0;
+      document.getElementById('stat-deny').textContent     = stats.deny     ?? 0;
+      document.getElementById('stat-approval').textContent = (stats.require_approval ?? 0);
+      document.getElementById('stat-log').textContent      = stats.log      ?? 0;
+
+      const tbody = document.getElementById('event-body');
+      if (!events || events.length === 0) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No events yet. Make a tool call to see activity.</td></tr>';
+      } else {
+        tbody.innerHTML = events.map(e => `
+          <tr>
+            <td class="ts">${fmt(e.timestamp)}</td>
+            <td class="caller">${e.caller_sub || '–'}</td>
+            <td><span class="type-badge">${e.caller_type || 'human'}</span></td>
+            <td class="tool-name">${e.tool_namespaced || '–'}</td>
+            <td>${badge(e.decision)}</td>
+            <td class="reason" title="${e.policy_reason || ''}">${e.policy_rule || e.policy_reason || '–'}</td>
+            <td class="latency">${e.latency_ms > 0 ? e.latency_ms + 'ms' : '–'}</td>
+          </tr>
+        `).join('');
+      }
+
+      document.getElementById('refresh-ts').textContent =
+        'Updated ' + new Date().toLocaleTimeString();
+    } catch (err) {
+      document.getElementById('refresh-ts').textContent = 'Connection error';
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 3000);
+</script>
+</body>
+</html>

@@ -5,7 +5,7 @@ package mocks
 import (
 	context "context"
 
-	gateway "github.com/ro-eng/mcp-proxy/gateway"
+	gateway "github.com/jphines/mcp-proxy/gateway"
 	mock "github.com/stretchr/testify/mock"
 )
 

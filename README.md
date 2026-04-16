@@ -45,7 +45,7 @@ Claude Code / claude.ai / Agents
 The proxy is a single Go binary (`cmd/mcp-proxy`) that implements the MCP Streamable HTTP transport. Upstream clients connect to `POST /mcp`; the proxy authenticates, filters the tool catalog, and creates a fresh `mcp.Server` per session. When a tool is invoked, the 8-stage pipeline runs synchronously.
 
 ```
-github.com/ro-eng/mcp-proxy
+github.com/jphines/mcp-proxy
 ├── cmd/mcp-proxy/        Entry point: wire deps, start server
 ├── gateway/              Interfaces + domain types (no logic)
 └── internal/

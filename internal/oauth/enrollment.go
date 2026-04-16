@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // Enrollment implements gateway.OAuthEnrollment.

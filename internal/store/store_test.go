@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ro-eng/mcp-proxy/internal/store"
+	"github.com/jphines/mcp-proxy/internal/store"
 )
 
 // TestAuditRow_Fields verifies the AuditRow struct has all fields needed

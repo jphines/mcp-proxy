@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
-	"github.com/ro-eng/mcp-proxy/internal/mocks"
-	"github.com/ro-eng/mcp-proxy/internal/oauth"
+	"github.com/jphines/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/internal/mocks"
+	"github.com/jphines/mcp-proxy/internal/oauth"
 )
 
 var testSecret = []byte("a-32-byte-hmac-secret-for-testing!")

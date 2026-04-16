@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // credentialMiddleware resolves the downstream credential for the current call.

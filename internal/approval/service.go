@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // Service implements gateway.ApprovalService using an in-memory pending map.

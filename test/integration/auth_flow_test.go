@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	mcp_fixture "github.com/ro-eng/mcp-proxy/test/mcp_fixture"
+	mcp_fixture "github.com/jphines/mcp-proxy/test/mcp_fixture"
 )
 
 // TestAuthFlow_ValidToken verifies that a valid Okta JWT allows a tool call

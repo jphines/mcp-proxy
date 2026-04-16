@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // enrollmentMiddleware verifies that the calling identity has completed the OAuth

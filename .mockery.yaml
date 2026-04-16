@@ -3,7 +3,7 @@ disable-version-string: true
 issue-845-fix: true
 
 packages:
-  github.com/ro-eng/mcp-proxy/gateway:
+  github.com/jphines/mcp-proxy/gateway:
     config:
       outpkg: mocks
       dir: "internal/mocks"

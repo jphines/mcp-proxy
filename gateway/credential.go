@@ -60,7 +60,11 @@ type Credential struct {
 
 // Zero wipes secret material from memory.
 // Must be called via defer in every middleware that holds a resolved Credential.
+// Safe to call on a nil *Credential.
 func (c *Credential) Zero() {
+	if c == nil {
+		return
+	}
 	for i := range c.Value {
 		c.Value[i] = 0
 	}

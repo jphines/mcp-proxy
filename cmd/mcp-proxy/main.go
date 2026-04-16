@@ -5,13 +5,13 @@
 //
 // Startup order:
 //  1. Load and validate configuration from environment variables.
-//  2. Connect to PostgreSQL; run migrations (warn on failure, don't abort).
-//  3. Initialise AWS SDK clients (Secrets Manager, STS, CloudWatch Logs).
-//  4. Construct the audit hash chain seed via PostgreSQL (or random fallback).
-//  5. Build all internal components (metrics, credential store, registry, policy, …).
-//  6. Assemble gateway.Dependencies and create the Proxy.
-//  7. Start the HTTP server (TLS if cert/key configured, plain HTTP otherwise).
-//  8. Block until SIGTERM/SIGINT; drain in-flight requests, then shut down.
+//  2. Connect to PostgreSQL; run migrations (hard failure — both audit and
+//     credentials require the database).
+//  3. Construct the audit hash chain seed via PostgreSQL.
+//  4. Build all internal components (metrics, credential store, registry, policy, …).
+//  5. Assemble gateway.Dependencies and create the Proxy.
+//  6. Start the HTTP server (TLS if cert/key configured, plain HTTP otherwise).
+//  7. Block until SIGTERM/SIGINT; drain in-flight requests, then shut down.
 package main
 
 import (
@@ -25,28 +25,25 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
-	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
-	"github.com/ro-eng/mcp-proxy/internal/approval"
-	"github.com/ro-eng/mcp-proxy/internal/auth"
-	"github.com/ro-eng/mcp-proxy/internal/config"
-	"github.com/ro-eng/mcp-proxy/internal/credential"
-	credstore "github.com/ro-eng/mcp-proxy/internal/credential/store"
-	"github.com/ro-eng/mcp-proxy/internal/metrics"
-	"github.com/ro-eng/mcp-proxy/internal/oauth"
-	"github.com/ro-eng/mcp-proxy/internal/policy"
-	"github.com/ro-eng/mcp-proxy/internal/proxy"
-	"github.com/ro-eng/mcp-proxy/internal/registry"
-	"github.com/ro-eng/mcp-proxy/internal/store"
-
-	cwaudit "github.com/ro-eng/mcp-proxy/internal/audit"
+	"github.com/jphines/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/internal/approval"
+	"github.com/jphines/mcp-proxy/internal/auth"
+	pgaudit "github.com/jphines/mcp-proxy/internal/audit"
+	"github.com/jphines/mcp-proxy/internal/config"
+	"github.com/jphines/mcp-proxy/internal/credential"
+	credstore "github.com/jphines/mcp-proxy/internal/credential/store"
+	"github.com/jphines/mcp-proxy/internal/metrics"
+	"github.com/jphines/mcp-proxy/internal/oauth"
+	"github.com/jphines/mcp-proxy/internal/policy"
+	"github.com/jphines/mcp-proxy/internal/proxy"
+	"github.com/jphines/mcp-proxy/internal/registry"
+	"github.com/jphines/mcp-proxy/internal/store"
 )
 
 func main() {
@@ -79,66 +76,73 @@ func run(ctx context.Context) error {
 	)
 
 	// ── 2. PostgreSQL ─────────────────────────────────────────────────────────
-	var db *store.DB
-	if db, err = store.Open(ctx, cfg.DatabaseURL); err != nil {
-		// Warn and continue: proxy degrades to CloudWatch-only audit.
-		slog.Warn("PostgreSQL unavailable; audit will be CloudWatch-only",
-			slog.String("error", err.Error()))
-		db = nil
-	} else {
-		defer db.Close()
-	}
-
-	// ── 3. AWS clients ────────────────────────────────────────────────────────
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
+	// Both audit logging and credential storage require PostgreSQL.
+	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
-		return fmt.Errorf("loading AWS config: %w", err)
+		return fmt.Errorf("connecting to PostgreSQL: %w", err)
 	}
+	defer db.Close()
 
-	smClient := secretsmanager.NewFromConfig(awsCfg)
-	stsClient := awssts.NewFromConfig(awsCfg)
-	cwClient := cloudwatchlogs.NewFromConfig(awsCfg)
-
-	// Canary check: warn if Secrets Manager is unreachable (non-fatal).
-	canaryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if _, err := smClient.ListSecrets(canaryCtx, &secretsmanager.ListSecretsInput{
-		MaxResults: aws.Int32(1),
-	}); err != nil {
-		slog.Warn("Secrets Manager canary check failed; cached credentials still work",
-			slog.String("error", err.Error()))
-	}
-
-	// ── 4. Audit hash chain seed ──────────────────────────────────────────────
+	// ── 3. Audit hash chain seed ──────────────────────────────────────────────
 	genesisHash := randomHex(32)
-	if db != nil {
-		seedCtx, cancel2 := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel2()
-		stored, err := db.UpsertChainGenesis(seedCtx, cfg.InstanceID, genesisHash)
-		if err != nil {
-			slog.Warn("could not persist genesis hash; using ephemeral seed",
-				slog.String("error", err.Error()))
-		} else {
-			genesisHash = stored
-		}
+	seedCtx, seedCancel := context.WithTimeout(ctx, 5*cfg.ShutdownTimeout/30)
+	defer seedCancel()
+	if stored, err := db.UpsertChainGenesis(seedCtx, cfg.InstanceID, genesisHash); err != nil {
+		slog.Warn("could not persist genesis hash; using ephemeral seed",
+			slog.String("error", err.Error()))
+	} else {
+		genesisHash = stored
 	}
 
-	// ── 5. Internal components ─────────────────────────────────────────────────
+	// ── 4. Internal components ─────────────────────────────────────────────────
 
 	// Metrics — register once; subsequent calls would panic.
 	metricsCollector := metrics.New()
 
-	// Credential store (Secrets Manager + AES-256-GCM cache).
-	credStore, err := credstore.New(smClient, cfg.CredentialCacheTTL)
-	if err != nil {
-		return fmt.Errorf("initialising credential store: %w", err)
+	// ── AWS SDK (lazy — only loaded when needed) ──────────────────────────────
+	var awsCfg *aws.Config
+	loadAWSConfig := func() (*aws.Config, error) {
+		if awsCfg != nil {
+			return awsCfg, nil
+		}
+		var opts []func(*awsconfig.LoadOptions) error
+		if cfg.AWSRegion != "" {
+			opts = append(opts, awsconfig.WithRegion(cfg.AWSRegion))
+		}
+		c, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("loading AWS SDK config: %w", err)
+		}
+		awsCfg = &c
+		return awsCfg, nil
+	}
+
+	// Credential store — either PostgreSQL or AWS Secrets Manager.
+	var credStore gateway.CredentialStore
+	switch cfg.CredentialBackend {
+	case "secretsmanager":
+		ac, err := loadAWSConfig()
+		if err != nil {
+			return err
+		}
+		smClient := secretsmanager.NewFromConfig(*ac)
+		credStore, err = credstore.New(smClient, cfg.CredentialCacheTTL)
+		if err != nil {
+			return fmt.Errorf("initialising Secrets Manager credential store: %w", err)
+		}
+		slog.Info("credential store: AWS Secrets Manager")
+	default: // "postgres"
+		credStore, err = credstore.NewPostgres(db.Pool(), []byte(cfg.CredentialEncryptionKey), cfg.CredentialCacheTTL)
+		if err != nil {
+			return fmt.Errorf("initialising credential store: %w", err)
+		}
+		slog.Info("credential store: PostgreSQL")
 	}
 
 	// OAuth token cache (5-minute GC interval).
-	tokenCache := oauth.NewTokenCache(5 * time.Minute)
+	tokenCache := oauth.NewTokenCache(5 * cfg.ApprovalTimeout / 30)
 
 	// Server registry — loaded from servers.yaml; hot-reloaded via fsnotify.
-	// NewToolLister is a standalone function; no circular dependency with Proxy.
 	serversYAML := cfg.ConfigDir + "/servers.yaml"
 	reg, err := registry.New(serversYAML, proxy.NewToolLister())
 	if err != nil {
@@ -155,11 +159,29 @@ func run(ctx context.Context) error {
 		ProxyBaseURL:    cfg.ProxyBaseURL,
 	})
 
-	// Credential resolver (composite: OAuth → static → STS → XAA stub).
-	credResolver := credential.NewCompositeResolver(credStore, enrollment, stsClient)
+	// STS resolver (optional — constructed only if any server uses the STS strategy).
+	var stsResolver *credential.STSResolver
+	if needsSTS(reg) {
+		ac, err := loadAWSConfig()
+		if err != nil {
+			return fmt.Errorf("STS strategy configured but AWS SDK failed: %w", err)
+		}
+		stsClient := sts.NewFromConfig(*ac)
+		stsResolver = credential.NewSTSResolver(stsClient)
+		slog.Info("STS credential resolver enabled")
+	}
 
-	// Okta authenticator + background JWKS refresh.
-	authenticator := auth.NewOktaAuthenticator(cfg.OktaIssuer, cfg.OktaAudience)
+	// Credential resolver (composite: OAuth → static → STS → XAA stub).
+	credResolver := credential.NewCompositeResolver(credStore, enrollment, stsResolver)
+
+	// OIDC authenticator (Okta, Auth0, or any JWKS-compatible IdP).
+	// When Auth0 is configured, override the groups claim key so the proxy
+	// reads from the custom Auth0 Post-Login Action namespace claim.
+	var authOpts []auth.AuthOption
+	if cfg.Auth0GroupsClaim != "" {
+		authOpts = append(authOpts, auth.WithGroupsClaim(cfg.Auth0GroupsClaim))
+	}
+	authenticator := auth.NewOktaAuthenticator(cfg.OktaIssuer, cfg.OktaAudience, authOpts...)
 	authenticator.StartBackgroundRefresh(ctx)
 
 	// CEL policy engine — fails at startup if any rule has a compile error.
@@ -174,19 +196,15 @@ func run(ctx context.Context) error {
 	approvalSvc := approval.NewService(slackSender)
 	approvalHandler := approval.NewHandler(approvalSvc, cfg.SlackSigningSecret)
 
-	// CloudWatch audit logger.
-	logStreamName := fmt.Sprintf("%s/%s", cfg.Workspace, cfg.InstanceID)
-	auditLogger := cwaudit.NewCloudWatchLogger(cwClient, cwaudit.CloudWatchOptions{
-		LogGroupName:  "mcp-proxy",
-		LogStreamName: logStreamName,
-		InstanceID:    cfg.InstanceID,
-		Workspace:     cfg.Workspace,
-		GenesisHash:   genesisHash,
-		DB:            db,
+	// PostgreSQL audit logger.
+	auditLogger := pgaudit.NewPostgresLogger(db, pgaudit.PostgresOptions{
+		InstanceID:  cfg.InstanceID,
+		Workspace:   cfg.Workspace,
+		GenesisHash: genesisHash,
 	})
 	defer auditLogger.Close()
 
-	// ── 6. Assemble gateway.Dependencies and create Proxy ─────────────────────
+	// ── 5. Assemble gateway.Dependencies and create Proxy ─────────────────────
 	deps := &gateway.Dependencies{
 		Authenticator:      authenticator,
 		PolicyEngine:       policyEngine,
@@ -199,9 +217,15 @@ func run(ctx context.Context) error {
 		MetricsCollector:   metricsCollector,
 	}
 
-	p := proxy.New(deps)
+	p := proxy.New(deps, proxy.Options{
+		ProxyBaseURL:  cfg.ProxyBaseURL,
+		DemoJWTURL:    cfg.DemoJWTURL,
+		Auth0Domain:   cfg.Auth0Domain,
+		Auth0ClientID: cfg.Auth0ClientID,
+		Auth0Audience: cfg.Auth0Audience,
+	})
 
-	// ── 7. HTTP server ─────────────────────────────────────────────────────────
+	// ── 6. HTTP server ─────────────────────────────────────────────────────────
 	httpServer := p.NewHTTPServer(cfg.ListenAddr, approvalHandler)
 
 	serverErr := make(chan error, 1)
@@ -222,7 +246,7 @@ func run(ctx context.Context) error {
 		slog.String("instance_id", cfg.InstanceID),
 	)
 
-	// ── 8. Graceful shutdown ───────────────────────────────────────────────────
+	// ── 7. Graceful shutdown ───────────────────────────────────────────────────
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 
@@ -246,6 +270,16 @@ func run(ctx context.Context) error {
 
 	slog.Info("shutdown complete")
 	return nil
+}
+
+// needsSTS checks whether any registered server uses the STS auth strategy.
+func needsSTS(reg gateway.ServerRegistry) bool {
+	stsStrategy := gateway.AuthStrategySTS
+	servers, err := reg.List(context.Background(), &gateway.ServerFilter{Strategy: &stsStrategy})
+	if err != nil {
+		return false
+	}
+	return len(servers) > 0
 }
 
 // randomHex returns n random bytes encoded as a hex string.

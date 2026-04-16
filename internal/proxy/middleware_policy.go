@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // policyMiddleware evaluates the loaded CEL policy rules against the inbound
@@ -21,6 +21,12 @@ func (p *Proxy) policyMiddleware(ctx context.Context, tc *gateway.ToolCallContex
 		Tags:      tc.ServerConfig.Tags,
 	}
 
+	slog.DebugContext(ctx, "policy: evaluating",
+		slog.String("server_id", call.ServerID),
+		slog.String("tool_name", call.ToolName),
+		slog.String("identity_type", string(tc.Identity.Type)),
+	)
+
 	decision, evalErr := p.deps.PolicyEngine.Evaluate(ctx, tc.Identity, call)
 	if evalErr != nil {
 		// Fail-open: record the error but allow the call through.
@@ -34,6 +40,13 @@ func (p *Proxy) policyMiddleware(ctx context.Context, tc *gateway.ToolCallContex
 	}
 
 	tc.Decision = decision
+
+	if decision != nil {
+		slog.DebugContext(ctx, "policy: decision",
+			slog.String("action", string(decision.Action)),
+			slog.String("rule", decision.Rule),
+		)
+	}
 
 	if decision != nil && decision.Action == gateway.ActionDeny {
 		tc.Err = gateway.ErrPolicyDenied

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ro-eng/mcp-proxy/gateway"
+	"github.com/jphines/mcp-proxy/gateway"
 )
 
 // approvalMiddleware blocks tool calls that require human-in-the-loop approval.

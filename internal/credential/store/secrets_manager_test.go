@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	credstore "github.com/ro-eng/mcp-proxy/internal/credential/store"
+	credstore "github.com/jphines/mcp-proxy/internal/credential/store"
 )
 
 func TestEncryptedCache_SetAndGet(t *testing.T) {
